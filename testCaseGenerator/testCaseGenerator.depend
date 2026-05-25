@@ -1,0 +1,7 @@
+# depslib dependency file v1.0
+1779731247 source:c:\users\user\desktop\testcasegenerator\main.cpp
+	<iostream>
+	<fstream>
+	<vector>
+	<string>
+
