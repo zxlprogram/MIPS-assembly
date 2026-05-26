@@ -1,0 +1,9 @@
+# depslib dependency file v1.0
+1779788562 source:c:\users\user\desktop\mipsdecodercpp\main.cpp
+	<iostream>
+	<vector>
+	<string>
+	<fstream>
+	<cstdio>
+	<cstdlib>
+

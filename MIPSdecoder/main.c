@@ -571,6 +571,5 @@ int main() {
 
     dump_registers();
     free(bits);
-
     return 0;
 }
