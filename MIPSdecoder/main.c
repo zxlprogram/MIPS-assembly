@@ -2,10 +2,14 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
-static int **reg;
-static int *HI;
-static int *LO;
-static int *data_mem;
+typedef struct {
+    bool bits[32]; // bits[0] is MSB, bits[31] is LSB
+} Register32;
+
+static Register32 reg[32];
+static Register32 HI;
+static Register32 LO;
+static int data_mem[1024];
 static int pc_code = 0;
 
 bool* readBinToPtrBool(const char* filename, int* total_bits) {
@@ -41,7 +45,6 @@ bool* readBinToPtrBool(const char* filename, int* total_bits) {
     return bitArray;
 }
 
-// 供 command (bool 陣列) 使用的轉換
 int toint(bool* r, int length) {
     int ret = 0;
     for(int i = 0; i < length; ++i) {
@@ -50,7 +53,6 @@ int toint(bool* r, int length) {
     return ret;
 }
 
-// 供 command (bool 陣列) 使用的有號轉換
 int toint_signed(bool* r, int length) {
     int ret = 0;
     if (r[0]) {
@@ -66,7 +68,7 @@ int toint_signed(bool* r, int length) {
     return ret;
 }
 
-int toint_signed_from_int(int* r, int length) {
+int toint_signed_from_int(bool* r, int length) {
     int ret = 0;
     if (r[0]) {
         for(int i = 0; i < length; ++i) {
@@ -90,16 +92,16 @@ void ret1(bool* r) {
     r[31] = 1;
 }
 
-// 32-bit 邏輯右移 (補 0)
-void shift_right_32(int* r) {
+// 32-bit 邏輯右移 (MSB補0)
+void shift_right_32(bool* r) {
     for (int i = 31; i > 0; --i) {
         r[i] = r[i - 1];
     }
     r[0] = 0;
 }
 
-// 32-bit 左移 (最低位補帶入的 bit)
-void shift_left_32(int* r, bool fill_bit) {
+// 32-bit 左移 (LSB補帶入的 bit)
+void shift_left_32(bool* r, bool fill_bit) {
     for (int i = 0; i < 31; ++i) {
         r[i] = r[i + 1];
     }
@@ -119,7 +121,6 @@ bool ALU1bit(bool a, bool b, bool cin, bool invertB, int operation, bool *cout_v
     }
 }
 
-// ==================== 32-bit 串聯 ALU ====================
 void ALU(bool* ctrl, bool* inputA, bool* inputB, bool* output) {
     int controlSignal = toint(ctrl, 3);
     bool invertB = false;
@@ -145,23 +146,22 @@ void ALU(bool* ctrl, bool* inputA, bool* inputB, bool* output) {
 void dump_registers() {
     printf("\n==================== REGISTER DUMP ====================\n");
     for (int i = 0; i < 32; ++i) {
-        int val = toint_signed_from_int(reg[i], 32);
+        int val = toint_signed_from_int(reg[i].bits, 32);
         printf("R%d: %d\t", i, val);
         if ((i + 1) % 4 == 0) {
             printf("\n");
         }
     }
-    int hi_val = toint_signed_from_int(HI, 32);
-    int lo_val = toint_signed_from_int(LO, 32);
+    int hi_val = toint_signed_from_int(HI.bits, 32);
+    int lo_val = toint_signed_from_int(LO.bits, 32);
     printf("HI: %d\tLO: %d\tPC: %d\n", hi_val, lo_val, pc_code);
     printf("=======================================================\n\n");
 }
 
-// 統一的暫存器寫入埠，加入 R0 保護機制
 void write_register(int reg_idx, bool* data) {
-    if (reg_idx == 0) return; // R0 唯讀保護，不允許寫入
+    if (reg_idx == 0) return; // R0 唯讀保護
     for(int i = 0; i < 32; i++) {
-        reg[reg_idx][i] = data[i];
+        reg[reg_idx].bits[i] = data[i];
     }
 }
 
@@ -172,8 +172,8 @@ void add(bool* rs, bool* rt, bool* rd) {
 
     bool inA[32], inB[32], out[32];
     for(int i = 0; i < 32; i++) {
-        inA[i] = reg[rs_idx][i];
-        inB[i] = reg[rt_idx][i];
+        inA[i] = reg[rs_idx].bits[i];
+        inB[i] = reg[rt_idx].bits[i];
     }
 
     bool alu_ctrl[3] = {0, 1, 0};
@@ -190,8 +190,8 @@ void sub(bool* rs, bool* rt, bool* rd) {
 
     bool inA[32], inB[32], out[32];
     for(int i = 0; i < 32; i++) {
-        inA[i] = reg[rs_idx][i];
-        inB[i] = reg[rt_idx][i];
+        inA[i] = reg[rs_idx].bits[i];
+        inB[i] = reg[rt_idx].bits[i];
     }
 
     bool alu_ctrl[3] = {1, 1, 0};
@@ -208,8 +208,8 @@ void and_mips(bool* rs, bool* rt, bool* rd) {
 
     bool inA[32], inB[32], out[32];
     for(int i = 0; i < 32; i++) {
-        inA[i] = reg[rs_idx][i];
-        inB[i] = reg[rt_idx][i];
+        inA[i] = reg[rs_idx].bits[i];
+        inB[i] = reg[rt_idx].bits[i];
     }
 
     bool alu_ctrl[3] = {0, 0, 0};
@@ -226,8 +226,8 @@ void or_mips(bool* rs, bool* rt, bool* rd) {
 
     bool inA[32], inB[32], out[32];
     for(int i = 0; i < 32; i++) {
-        inA[i] = reg[rs_idx][i];
-        inB[i] = reg[rt_idx][i];
+        inA[i] = reg[rs_idx].bits[i];
+        inB[i] = reg[rt_idx].bits[i];
     }
 
     bool alu_ctrl[3] = {0, 0, 1};
@@ -241,44 +241,45 @@ void mult(bool* rs, bool* rt) {
     int rs_idx = toint(rs, 5);
     int rt_idx = toint(rt, 5);
 
-    int multiplicand[32];
+    bool multiplicand[32];
     for(int i = 0; i < 32; i++) {
-        multiplicand[i] = reg[rs_idx][i];
-        HI[i] = 0;
-        LO[i] = reg[rt_idx][i];
+        multiplicand[i] = reg[rs_idx].bits[i];
+        HI.bits[i] = 0;
+        LO.bits[i] = reg[rt_idx].bits[i];
     }
 
-    bool alu_ctrl[3] = {0, 1, 0};
+    bool alu_ctrl[3] = {0, 1, 0}; // ADD
     bool inA[32], inB[32], out[32];
 
     for (int step = 0; step < 32; ++step) {
-        if (LO[31] == 1) {
+        if (LO.bits[31] == 1) { // 檢查 LSB
             for(int i = 0; i < 32; i++) {
-                inA[i] = HI[i];
+                inA[i] = HI.bits[i];
                 inB[i] = multiplicand[i];
             }
             ALU(alu_ctrl, inA, inB, out);
-            for(int i = 0; i < 32; i++) HI[i] = out[i];
+            for(int i = 0; i < 32; i++) HI.bits[i] = out[i];
         }
 
-        bool hi_lowest_bit = HI[31];
-        shift_right_32(HI);
-        shift_right_32(LO);
-        LO[0] = hi_lowest_bit;
+        // 串聯右移：HI 的最低位移入 LO 的最高位
+        bool hi_lowest_bit = HI.bits[31];
+        shift_right_32(HI.bits);
+        shift_right_32(LO.bits);
+        LO.bits[0] = hi_lowest_bit;
     }
 
-    printf("mult R%d, R%d (ALU Multiplier completed. LO value: %d)\n", rs_idx, rt_idx, toint_signed_from_int(LO, 32));
+    printf("mult R%d, R%d (ALU Multiplier completed. LO value: %d)\n", rs_idx, rt_idx, toint_signed_from_int(LO.bits, 32));
 }
 
 void div_mips(bool* rs, bool* rt) {
     int rs_idx = toint(rs, 5);
     int rt_idx = toint(rt, 5);
 
-    int divisor[32];
+    bool divisor[32];
     for(int i = 0; i < 32; i++) {
-        divisor[i] = reg[rt_idx][i];
-        HI[i] = 0;
-        LO[i] = reg[rs_idx][i];
+        divisor[i] = reg[rt_idx].bits[i];
+        HI.bits[i] = 0;
+        LO.bits[i] = reg[rs_idx].bits[i];
     }
 
     if (toint_signed_from_int(divisor, 32) == 0) {
@@ -291,50 +292,49 @@ void div_mips(bool* rs, bool* rt) {
     bool inA[32], inB[32], out[32];
 
     for (int step = 0; step < 32; ++step) {
-        bool lo_highest_bit = LO[0];
-        shift_left_32(HI, lo_highest_bit);
-        shift_left_32(LO, 0);
+        bool lo_highest_bit = LO.bits[0];
+        shift_left_32(HI.bits, lo_highest_bit);
+        shift_left_32(LO.bits, 0);
 
         for(int i = 0; i < 32; i++) {
-            inA[i] = HI[i];
+            inA[i] = HI.bits[i];
             inB[i] = divisor[i];
         }
         ALU(alu_sub, inA, inB, out);
 
         if (out[0] == 0) {
-            for(int i = 0; i < 32; i++) HI[i] = out[i];
-            LO[31] = 1;
+            for(int i = 0; i < 32; i++) HI.bits[i] = out[i];
+            LO.bits[31] = 1;
         } else {
             for(int i = 0; i < 32; i++) {
                 inA[i] = out[i];
                 inB[i] = divisor[i];
             }
             ALU(alu_add, inA, inB, out);
-            for(int i = 0; i < 32; i++) HI[i] = out[i];
-            LO[31] = 0;
+            for(int i = 0; i < 32; i++) HI.bits[i] = out[i];
+            LO.bits[31] = 0;
         }
     }
 
     printf("div R%d, R%d (ALU Divider completed. Quotient LO: %d, Remainder HI: %d)\n",
-           rs_idx, rt_idx, toint_signed_from_int(LO, 32), toint_signed_from_int(HI, 32));
+           rs_idx, rt_idx, toint_signed_from_int(LO.bits, 32), toint_signed_from_int(HI.bits, 32));
 }
 
-// 實作 jr (Jump Register)
 void jr(bool* rs) {
     int rs_idx = toint(rs, 5);
-    int target_pc = toint_signed_from_int(reg[rs_idx], 32);
+    int target_pc = toint_signed_from_int(reg[rs_idx].bits, 32);
 
     printf("jr R%d -> jump to address(instr line number): %d\n", rs_idx, target_pc);
-    pc_code = target_pc; // 直接修改暫存器變數控制硬體跳躍
+    pc_code = target_pc;
 }
 
-void beq(bool* rs, bool* rt, bool* immed) {
+bool beq(bool* rs, bool* rt, bool* immed) {
     int rs_idx = toint(rs, 5);
     int rt_idx = toint(rt, 5);
-    int rd_idx = toint(immed, 5);
+    int offset = toint_signed(immed, 16);
 
-    int *a = reg[rs_idx];
-    int *b = reg[rt_idx];
+    bool *a = reg[rs_idx].bits;
+    bool *b = reg[rt_idx].bits;
     bool isEqual = true;
 
     for(int i = 0; i < 32; i++) {
@@ -344,21 +344,21 @@ void beq(bool* rs, bool* rt, bool* immed) {
         }
     }
 
-    bool temp_rd[32];
-    if(isEqual) ret1(temp_rd);
-    else ret0(temp_rd);
-
-    write_register(rd_idx, temp_rd);
-    printf("beq compare R%d and R%d -> load result to R%d (result: %d)\n", rs_idx, rt_idx, rd_idx, isEqual);
+    printf("beq compare R%d and R%d -> (result: %d)\n", rs_idx, rt_idx, isEqual);
+    if(isEqual) {
+        pc_code += offset;
+        return true;
+    }
+    return false;
 }
 
-void bne(bool* rs, bool* rt, bool* immed) {
+bool bne(bool* rs, bool* rt, bool* immed) {
     int rs_idx = toint(rs, 5);
     int rt_idx = toint(rt, 5);
-    int rd_idx = toint(immed, 5);
+    int offset = toint_signed(immed, 16);
 
-    int *a = reg[rs_idx];
-    int *b = reg[rt_idx];
+    bool *a = reg[rs_idx].bits;
+    bool *b = reg[rt_idx].bits;
     bool isNotEqual = false;
 
     for(int i = 0; i < 32; i++) {
@@ -368,12 +368,12 @@ void bne(bool* rs, bool* rt, bool* immed) {
         }
     }
 
-    bool temp_rd[32];
-    if(isNotEqual) ret1(temp_rd);
-    else ret0(temp_rd);
-
-    write_register(rd_idx, temp_rd);
-    printf("bne compare R%d and R%d -> load result to R%d (result: %d)\n", rs_idx, rt_idx, rd_idx, isNotEqual);
+    printf("bne compare R%d and R%d -> (result: %d)\n", rs_idx, rt_idx, isNotEqual);
+    if(isNotEqual) {
+        pc_code += offset;
+        return true;
+    }
+    return false;
 }
 
 void lw(bool* rs, bool* rt, bool* immed) {
@@ -381,7 +381,7 @@ void lw(bool* rs, bool* rt, bool* immed) {
     int rt_idx = toint(rt, 5);
     int offset = toint_signed(immed, 16);
 
-    int base_val = toint_signed_from_int(reg[rs_idx], 32);
+    int base_val = toint_signed_from_int(reg[rs_idx].bits, 32);
     int mem_address = base_val + offset;
 
     if (mem_address < 0 || mem_address >= 1024) {
@@ -397,16 +397,15 @@ void lw(bool* rs, bool* rt, bool* immed) {
     write_register(rt_idx, temp);
     printf("lw R%d, %d(R%d) -> load value: %d\n", rt_idx, offset, rs_idx, loaded_value);
 }
-// addi: I-format, 將 rs 的值與 16-bit 有號立即數相加後存入 rt
+
 void addi(bool* rs, bool* rt, bool* immed) {
     int rs_idx = toint(rs, 5);
     int rt_idx = toint(rt, 5);
     int immediate = toint_signed(immed, 16);
 
-    int val_rs = toint_signed_from_int(reg[rs_idx], 32);
+    int val_rs = toint_signed_from_int(reg[rs_idx].bits, 32);
     int result = val_rs + immediate;
 
-    // 將 int 轉換回 bool 陣列並寫入
     bool temp[32];
     for (int i = 31; i >= 0; --i) {
         temp[i] = (result >> (31 - i)) & 1;
@@ -415,14 +414,13 @@ void addi(bool* rs, bool* rt, bool* immed) {
     printf("addi R%d, R%d, %d (result: %d)\n", rt_idx, rs_idx, immediate, result);
 }
 
-// slt: R-format, 如果 rs < rt 則 rd = 1，否則 rd = 0
 void slt(bool* rs, bool* rt, bool* rd) {
     int rs_idx = toint(rs, 5);
     int rt_idx = toint(rt, 5);
     int rd_idx = toint(rd, 5);
 
-    int val_rs = toint_signed_from_int(reg[rs_idx], 32);
-    int val_rt = toint_signed_from_int(reg[rt_idx], 32);
+    int val_rs = toint_signed_from_int(reg[rs_idx].bits, 32);
+    int val_rt = toint_signed_from_int(reg[rt_idx].bits, 32);
 
     bool temp[32];
     if (val_rs < val_rt) ret1(temp);
@@ -437,7 +435,7 @@ void sw(bool* rs, bool* rt, bool* immed) {
     int rt_idx = toint(rt, 5);
     int offset = toint_signed(immed, 16);
 
-    int base_val = toint_signed_from_int(reg[rs_idx], 32);
+    int base_val = toint_signed_from_int(reg[rs_idx].bits, 32);
     int mem_address = base_val + offset;
 
     if (mem_address < 0 || mem_address >= 1024) {
@@ -445,7 +443,7 @@ void sw(bool* rs, bool* rt, bool* immed) {
         return;
     }
 
-    int value_to_store = toint_signed_from_int(reg[rt_idx], 32);
+    int value_to_store = toint_signed_from_int(reg[rt_idx].bits, 32);
     data_mem[mem_address] = value_to_store;
     printf("sw R%d, %d(R%d) -> store value: %d into data_mem[%d]\n", rt_idx, offset, rs_idx, value_to_store, mem_address);
 }
@@ -453,14 +451,14 @@ void sw(bool* rs, bool* rt, bool* immed) {
 void Rformat(bool* opcode, bool* rs, bool* rt, bool* rd, bool* shamt, bool* funct) {
     int code = toint(funct, 6);
     switch(code) {
-        case 8:  jr(rs); break; // 融合了 funct code 8 轉發給 jr
+        case 8:  jr(rs); break;
         case 24: mult(rs, rt); break;
         case 26: div_mips(rs, rt); break;
         case 32: add(rs, rt, rd); break;
         case 34: sub(rs, rt, rd); break;
         case 36: and_mips(rs, rt, rd); break;
         case 37: or_mips(rs, rt, rd); break;
-        case 42: slt(rs,rt,rd);break;
+        case 42: slt(rs, rt, rd); break;
         default:
             printf("unknown R-format funct code: %d\n", code);
             break;
@@ -480,14 +478,12 @@ void Jformat(bool* opcode, bool* target) {
         case 3:
         {
             printf("jal -> record the returned address to R31 and jump to the location: %d\n", target_address);
-
             int next_instruction = pc_code + 1;
             bool temp[32];
             for (int i = 31; i >= 0; --i) {
                 temp[i] = (next_instruction >> (31 - i)) & 1;
             }
             write_register(31, temp);
-
             pc_code = target_address;
             break;
         }
@@ -498,37 +494,37 @@ void Jformat(bool* opcode, bool* target) {
     }
 }
 
-void Iformat(bool* opcode, bool* rs, bool* rt, bool* immed) {
+bool Iformat(bool* opcode, bool* rs, bool* rt, bool* immed) {
     int code = toint(opcode, 6);
     switch(code) {
-        case 4:  beq(rs, rt, immed); break;
-        case 5:  bne(rs, rt, immed); break;
+        case 4:  return beq(rs, rt, immed);
+        case 5:  return bne(rs, rt, immed);
         case 35: lw(rs, rt, immed); break;
         case 43: sw(rs, rt, immed); break;
-        case 8: addi(rs, rt, immed); break;
+        case 8:  addi(rs, rt, immed); break;
         default:
             printf("unknown I-format opcode: %d\n", code);
             break;
     }
+    return false;
 }
 
 int main() {
-    reg = (int**)malloc(32 * sizeof(int*));
     for(int i = 0; i < 32; i++) {
-        reg[i] = (int*)malloc(32 * sizeof(int));
-        for(int j = 0; j < 32; j++) reg[i][j] = 0;
+        for(int j = 0; j < 32; j++) reg[i].bits[j] = 0;
     }
 
-    HI = (int*)malloc(32 * sizeof(int));
-    LO = (int*)malloc(32 * sizeof(int));
-    for(int i = 0; i < 32; i++) HI[i] = LO[i] = 0;
+    for(int i = 0; i < 32; i++) {
+        HI.bits[i] = 0;
+        LO.bits[i] = 0;
+    }
 
-    data_mem = (int*)malloc(1024 * sizeof(int));
     for(int i = 0; i < 1024; i++) data_mem[i] = 0;
+
     data_mem[8] = 99;
 
-    reg[1][28] = 1; reg[1][30] = 1; // R1 = 10
-    reg[2][30] = 1; reg[2][31] = 1; // R2 = 3
+    reg[1].bits[28] = 1; reg[1].bits[30] = 1; // R1 = 10
+    reg[2].bits[30] = 1; reg[2].bits[31] = 1; // R2 = 3
 
     const char* filename = "input.bin";
     int total_bits = 0;
@@ -536,8 +532,6 @@ int main() {
 
     if (bits == NULL) {
         printf("failed to load file\n");
-        for(int i = 0; i < 32; i++) free(reg[i]);
-        free(reg); free(HI); free(LO); free(data_mem);
         return 1;
     }
 
@@ -545,44 +539,38 @@ int main() {
     printf("success to load file, include with %d commands\n", total_instructions);
 
     pc_code = 0;
-    while(pc_code * 32 < total_bits) {
+    while(pc_code >= 0 && pc_code * 32 < total_bits) {
         bool command[32];
         for(int i = 0; i < 32; i++) {
             command[i] = bits[i + pc_code * 32];
         }
 
         int op_type = toint(command, 6);
-
-        // 核心修正：動態判定這個指令是否會自己改寫 PC 控制流
-        bool is_jumped = (op_type == 2 || op_type == 3);
+        bool is_jumped = false;
 
         if(op_type == 0) {
-            // 如果是 R-format，進一步檢查是否為 jr (funct code 為 8)
             int funct_code = toint(command + 26, 6);
             if (funct_code == 8) {
                 is_jumped = true;
             }
             Rformat(command, command + 6, command + 11, command + 16, command + 21, command + 26);
         }
-        else if(is_jumped) {
+        else if(op_type == 2 || op_type == 3) {
+            is_jumped = true;
             Jformat(command, command + 6);
         }
         else {
-            Iformat(command, command + 6, command + 11, command + 16);
+            // I-format 執行，如果分支條件成立，回傳值會是 true 代表已經手動改過 PC 目的地了。
+            is_jumped = Iformat(command, command + 6, command + 11, command + 16);
         }
 
-        // 只有非跳躍指令，才循序執行下一行
         if (!is_jumped) {
             pc_code++;
         }
     }
 
     dump_registers();
-
-    // 清理資源
     free(bits);
-    for(int i = 0; i < 32; i++) free(reg[i]);
-    free(reg); free(HI); free(LO); free(data_mem);
 
     return 0;
 }
