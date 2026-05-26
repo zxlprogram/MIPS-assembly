@@ -397,6 +397,40 @@ void lw(bool* rs, bool* rt, bool* immed) {
     write_register(rt_idx, temp);
     printf("lw R%d, %d(R%d) -> load value: %d\n", rt_idx, offset, rs_idx, loaded_value);
 }
+// addi: I-format, 將 rs 的值與 16-bit 有號立即數相加後存入 rt
+void addi(bool* rs, bool* rt, bool* immed) {
+    int rs_idx = toint(rs, 5);
+    int rt_idx = toint(rt, 5);
+    int immediate = toint_signed(immed, 16);
+
+    int val_rs = toint_signed_from_int(reg[rs_idx], 32);
+    int result = val_rs + immediate;
+
+    // 將 int 轉換回 bool 陣列並寫入
+    bool temp[32];
+    for (int i = 31; i >= 0; --i) {
+        temp[i] = (result >> (31 - i)) & 1;
+    }
+    write_register(rt_idx, temp);
+    printf("addi R%d, R%d, %d (result: %d)\n", rt_idx, rs_idx, immediate, result);
+}
+
+// slt: R-format, 如果 rs < rt 則 rd = 1，否則 rd = 0
+void slt(bool* rs, bool* rt, bool* rd) {
+    int rs_idx = toint(rs, 5);
+    int rt_idx = toint(rt, 5);
+    int rd_idx = toint(rd, 5);
+
+    int val_rs = toint_signed_from_int(reg[rs_idx], 32);
+    int val_rt = toint_signed_from_int(reg[rt_idx], 32);
+
+    bool temp[32];
+    if (val_rs < val_rt) ret1(temp);
+    else ret0(temp);
+
+    write_register(rd_idx, temp);
+    printf("slt R%d, R%d, R%d (result: %d)\n", rd_idx, rs_idx, rt_idx, val_rs < val_rt);
+}
 
 void sw(bool* rs, bool* rt, bool* immed) {
     int rs_idx = toint(rs, 5);
@@ -426,6 +460,7 @@ void Rformat(bool* opcode, bool* rs, bool* rt, bool* rd, bool* shamt, bool* func
         case 34: sub(rs, rt, rd); break;
         case 36: and_mips(rs, rt, rd); break;
         case 37: or_mips(rs, rt, rd); break;
+        case 42: slt(rs,rt,rd);break;
         default:
             printf("unknown R-format funct code: %d\n", code);
             break;
@@ -470,6 +505,7 @@ void Iformat(bool* opcode, bool* rs, bool* rt, bool* immed) {
         case 5:  bne(rs, rt, immed); break;
         case 35: lw(rs, rt, immed); break;
         case 43: sw(rs, rt, immed); break;
+        case 8: addi(rs, rt, immed); break;
         default:
             printf("unknown I-format opcode: %d\n", code);
             break;
