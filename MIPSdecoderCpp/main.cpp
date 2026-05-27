@@ -2,13 +2,29 @@
 #include <vector>
 #include <string>
 #include <fstream>
+#include <bitset>
 #include <cstdio>
 #include <cstdlib>
 
 using namespace std;
-
+string transHexFormat(string command) {
+    string ret="";
+    for(int i=0;i<command.length();i++) {
+        if(command[i]!=' ')
+            ret+=bitset<4>(command[i]-(command[i]>='A'?'A'-10:'0')).to_string();
+    }
+    return ret;
+}
 class MipsSimulator {
-private:
+    private:
+    string transHexFormat(string command) {
+        string ret="";
+        for(int i=0;i<command.length();i++) {
+            if(command[i]!=' ')
+                ret+=bitset<4>(command[i]-(command[i]>='A'?'A'-10:'0')).to_string();
+        }
+        return ret;
+    }
     struct Register32 {
         bool bits[32] = {false}; // bits[0] is MSB, bits[31] is LSB
     };
@@ -554,10 +570,11 @@ public:
         reg[1].bits[28] = true; reg[1].bits[30] = true; // R1 = 10
         reg[2].bits[30] = true; reg[2].bits[31] = true; // R2 = 3
     }
-
-    // --- 直接傳入 32 字元的二進位字串並執行 ---
     void command(string machineCode) {
-        if (machineCode.length() != 32) {
+        string formatted=transHexFormat(machineCode);
+        if(formatted.length()==32)
+            machineCode=formatted;
+        if(machineCode.length() != 32) {
             cerr << "Error: Machine code must be exactly 32 bits long!" << endl;
             return;
         }
@@ -568,6 +585,25 @@ public:
         }
 
         executeSingleCommand(cmdBits);
+    }
+    void multicommand(string machineCode) {
+        string formatted="";
+        for(char c:machineCode)
+            if((c>='0'&&c<='9')||(c>='A'&&c<='F'))
+                formatted+=c;
+        machineCode=formatted;
+        for(int it=0;it<machineCode.length();it+=8) {
+            string singleMachineCode="";
+            for(int i=0;i<8;i++) {
+                singleMachineCode+=machineCode[it+i];
+            }
+            bool cmdBits[32];
+            string bitCode=transHexFormat(singleMachineCode);
+            for(int i=0;i<32;++i) {
+                cmdBits[i]=(bitCode[i]=='1');
+            }
+            executeSingleCommand(cmdBits);
+        }
     }
 
     // 讀取並執行完整的二進位二進制檔案
@@ -626,32 +662,11 @@ public:
         printf("=======================================================\n\n");
     }
 };
+
 int main() {
     MipsSimulator sim;
-
     cout << "--- fibonacci testcase ---" << endl;
-
-    sim.command("00100100000010000000000000000111");
-    sim.command("00100100000100000000000000000000");
-    sim.command("00100100000100010000000000000001");
-    sim.command("00100100000010010000000000000010");
-    sim.command("00000001000010010101000000101010");
-    sim.command("00010101010000000000000000000111");
-    sim.command("00000010001100001001000000100001");
-    sim.command("00000010001000001000000000100001");
-    sim.command("00000010010000001000100000100001");
-    sim.command("00100100100010010000000000000001");
-    for(int i = 0; i < 5; i++) {
-        sim.command("00000010001100001001000000100001");
-        sim.command("00000010001000001000000000100001");
-        sim.command("00000010010000001000100000100001");
-        sim.command("00100101001010010000000000000001");
-    }
-    sim.command("00100100000000100000000000000001");
-    sim.command("00000010010000000010000000100001");
-    sim.command("00000000000000000000000000001100");
-    sim.command("00100100000000100000000000001010");
-    sim.command("00000000000000000000000000001100");
+    sim.multicommand("24 08 00 07 24 10 00 00 24 11 00 01 24 09 00 02 01 09 50 2A 15 40 00 07 02 30 90 21 02 20 80 21 02 40 88 21 24 89 00 01 02 30 90 21 02 20 80 21 02 40 88 21 25 29 00 01 02 30 90 21 02 20 80 21 02 40 88 21 25 29 00 01 02 30 90 21 02 20 80 21 02 40 88 21 25 29 00 01 02 30 90 21 02 20 80 21 02 40 88 21 25 29 00 01 02 30 90 21 02 20 80 21 02 40 88 21 25 29 00 01 24 02 00 01 02 40 20 21 00 00 00 0C 24 02 00 0A 00 00 00 0C");
     sim.dump_registers();
     return 0;
 }
