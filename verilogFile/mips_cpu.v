@@ -1,30 +1,26 @@
 // ============================================================
-//  MIPS CPU — Single-Cycle Implementation
-//  Translated from C simulator
-//
-//  Supported instructions:
-//    R-format : add, sub, and, or, mult, div, jr
-//    I-format : beq, bne, lw, sw
-//    J-format : j, jal
+//  MIPS CPU — Single-Cycle Implementation (Fixed & Completed)
 // ============================================================
 
 `timescale 1ns/1ps
 
 // ------------------------------------------------------------
-//  1-bit ALU cell (matches ALU1bit in C)
+//  1-bit ALU cell
 // ------------------------------------------------------------
 module alu_1bit (
     input  wire a,
     input  wire b,
     input  wire cin,
     input  wire invertB,
-    input  wire [1:0] operation,   // 0=AND 1=OR 2=ADD/SUB
+    input  wire [1:0] operation,   // 0=AND, 1=OR, 2=ADD/SUB/SLT
     output wire result,
-    output wire cout
+    output wire cout,
+    output wire sum_out            // 導出純加法器的結果給 SLT 使用
 );
     wire real_b = invertB ? ~b : b;
     wire sum    = a ^ real_b ^ cin;
     assign cout = (a & real_b) | (cin & (a ^ real_b));
+    assign sum_out = sum;
 
     assign result = (operation == 2'd0) ? (a & real_b) :
                     (operation == 2'd1) ? (a | real_b) :
@@ -33,12 +29,13 @@ endmodule
 
 
 // ------------------------------------------------------------
-//  32-bit Ripple-Carry ALU (matches ALU in C)
+//  32-bit Ripple-Carry ALU (Supports SLT)
 //  ctrl[2:0] :
 //    3'b000 = AND
 //    3'b001 = OR
 //    3'b010 = ADD
 //    3'b110 = SUB
+//    3'b111 = SLT (Set Less Than)
 // ------------------------------------------------------------
 module alu_32bit (
     input  wire [2:0]  ctrl,
@@ -47,10 +44,13 @@ module alu_32bit (
     output wire [31:0] result,
     output wire        overflow
 );
-    wire invertB  = ctrl[2];              // SUB sets bit[2]
+    wire invertB  = ctrl[2];              // SUB 與 SLT 都需要對 B 進行反相
     wire [1:0] op = ctrl[1:0];
     wire [32:0] carry;
-    assign carry[0] = invertB;           // cin = 1 for SUB (two's complement)
+    wire [31:0] sum_out;
+    wire [31:0] basic_result;
+    
+    assign carry[0] = invertB;            // SUB/SLT 時 cin = 1 作二補數
 
     genvar i;
     generate
@@ -61,45 +61,53 @@ module alu_32bit (
                 .cin      (carry[i]),
                 .invertB  (invertB),
                 .operation(op),
-                .result   (result[i]),
-                .cout     (carry[i+1])
+                .result   (basic_result[i]),
+                .cout     (carry[i+1]),
+                .sum_out  (sum_out[i])
             );
         end
     endgenerate
 
     assign overflow = carry[32] ^ carry[31];
+
+    // SLT 邏輯：若 A < B，則 (A - B) 的結果會是負數。
+    // 在沒有溢位的情況下，直接看最高位元 (Sign bit) sum_out[31] 即可。
+    // 若有溢位，則需要將最高位元與溢位旗標做 XOR (sum_out[31] ^ overflow)。
+    wire slt_out = sum_out[31] ^ overflow;
+
+    // 最終輸出選擇：如果是 3'b111 則輸出 SLT 的 0 或 1，否則輸出常規 ALU 結果
+    assign result = (ctrl == 3'b111) ? {31'd0, slt_out} : basic_result;
 endmodule
 
 
 // ------------------------------------------------------------
-//  Instruction Memory  (ROM — read from parameter or $readmemb)
+//  Instruction Memory
 // ------------------------------------------------------------
 module instr_mem #(
     parameter DEPTH = 256
 )(
-    input  wire [7:0]  addr,       // word address (= PC)
+    input  wire [7:0]  addr,
     output wire [31:0] instr
 );
     reg [31:0] mem [0:DEPTH-1];
     integer k;
     initial begin
         for (k = 0; k < DEPTH; k = k + 1) mem[k] = 32'b0;
-        // Load binary file produced by assembler
-        $readmemb("input_text.bin", mem);
+        $readmemh("input.txt", mem); 
     end
     assign instr = mem[addr];
 endmodule
 
 
 // ------------------------------------------------------------
-//  Data Memory  (initialised like the C simulator)
+//  Data Memory (修正：記憶體位址對齊)
 // ------------------------------------------------------------
 module data_mem #(
     parameter DEPTH = 1024
 )(
     input  wire        clk,
     input  wire        we,
-    input  wire [9:0]  addr,
+    input  wire [9:0]  addr,       // 來自 ALU 的 Byte 位址
     input  wire [31:0] wdata,
     output wire [31:0] rdata
 );
@@ -107,29 +115,28 @@ module data_mem #(
     integer k;
     initial begin
         for (k = 0; k < DEPTH; k = k + 1) mem[k] = 32'b0;
-        mem[8] = 32'd99;    // matches C: data_mem[8] = 99
+        mem[2] = 32'd99;           // C 語言的 data_mem[8] 換算成 Word 索引是 8 >> 2 = 2
     end
+    
+    // 硬體對齊：將 Byte Address 右移 2 bits 轉換為真正的 Word Index
+    wire [7:0] word_addr = addr[9:2];
+
     always @(posedge clk) begin
-        if (we) mem[addr] <= wdata;
+        if (we) mem[word_addr] <= wdata;
     end
-    assign rdata = mem[addr];
+    assign rdata = mem[word_addr];
 endmodule
 
 
 // ------------------------------------------------------------
-//  Register File  (32 × 32-bit, R0 hard-wired to 0)
-//  Initial values match the C simulator:
-//    R1 = 10  (bit 28 and bit 30 set  → 2+8=10, little-endian index)
-//    R2 =  3  (bit 30 and bit 31 set  → 1+2=3)
-//  NOTE: the C code uses big-endian bit ordering inside each int[32],
-//        so reg[1][28]=1, reg[1][30]=1 → value = 2^(31-28)+2^(31-30) = 8+2 = 10
+//  Register File (優化：改為負緣寫入，避免 Single-Cycle 競爭)
 // ------------------------------------------------------------
 module reg_file (
     input  wire        clk,
     input  wire        we,
-    input  wire [4:0]  ra,   // read port A
-    input  wire [4:0]  rb,   // read port B
-    input  wire [4:0]  rw,   // write port
+    input  wire [4:0]  ra,         // 讀取埠 A
+    input  wire [4:0]  rb,         // 讀取埠 B
+    input  wire [4:0]  rw,         // 寫入埠
     input  wire [31:0] wdata,
     output wire [31:0] qa,
     output wire [31:0] qb
@@ -138,12 +145,12 @@ module reg_file (
     integer k;
     initial begin
         for (k = 0; k < 32; k = k + 1) regs[k] = 32'b0;
-        regs[1] = 32'd10;   // R1 = 10
-        regs[2] = 32'd3;    // R2 = 3
+        regs[1] = 32'd10;          // R1 = 10
+        regs[2] = 32'd3;           // R2 = 3
     end
 
-    // R0 is always 0 (write ignored)
-    always @(posedge clk) begin
+    // 採用負緣寫入 (negedge)，讓資料在後半個週期穩定寫入，防止與 PC 更新衝突
+    always @(negedge clk) begin
         if (we && rw != 5'd0) regs[rw] <= wdata;
     end
 
@@ -153,10 +160,7 @@ endmodule
 
 
 // ------------------------------------------------------------
-//  32×32-bit Multiplier  (shift-and-add, matches mult() in C)
-//  Result: {HI, LO} = rs × rt  (signed)
-//  Purely combinational for single-cycle; use clocked version
-//  in a multi-cycle design.
+//  32×32-bit Multiplier
 // ------------------------------------------------------------
 module multiplier (
     input  wire signed [31:0] rs,
@@ -171,13 +175,13 @@ endmodule
 
 
 // ------------------------------------------------------------
-//  32-bit Divider  (signed, matches div_mips() in C)
+//  32-bit Divider
 // ------------------------------------------------------------
 module divider (
     input  wire signed [31:0] rs,
     input  wire signed [31:0] rt,
-    output wire        [31:0] hi,   // remainder
-    output wire        [31:0] lo    // quotient
+    output wire        [31:0] hi,
+    output wire        [31:0] lo
 );
     assign lo = (rt != 32'd0) ? $signed(rs) / $signed(rt) : 32'hDEAD_BEEF;
     assign hi = (rt != 32'd0) ? $signed(rs) % $signed(rt) : 32'hDEAD_BEEF;
@@ -185,7 +189,7 @@ endmodule
 
 
 // ------------------------------------------------------------
-//  Sign-Extender  (16 → 32 bits)
+//  Sign-Extender
 // ------------------------------------------------------------
 module sign_extend (
     input  wire [15:0] in,
@@ -196,39 +200,33 @@ endmodule
 
 
 // ------------------------------------------------------------
-//  Control Unit
-//  Decodes opcode (and funct for R-type) into control signals
+//  Control Unit (補齊：addiu 與 slt)
 // ------------------------------------------------------------
 module control_unit (
     input  wire [5:0]  opcode,
     input  wire [5:0]  funct,
 
-    // register-file controls
     output reg         reg_dst,    // 1=rd, 0=rt
     output reg         reg_write,
-    output reg         link,       // jal writes PC+1 to R31
+    output reg         link,       
 
-    // ALU controls
-    output reg  [2:0]  alu_ctrl,   // passed directly to alu_32bit
-    output reg         alu_src,    // 1=sign-extended imm, 0=reg
+    output reg  [2:0]  alu_ctrl,   
+    output reg         alu_src,    // 1=立即數, 0=暫存器
 
-    // memory controls
     output reg         mem_read,
     output reg         mem_write,
-    output reg         mem_to_reg, // 1=load from memory
+    output reg         mem_to_reg, 
 
-    // branch / jump controls
     output reg         branch_eq,  // beq
     output reg         branch_ne,  // bne
     output reg         jump,       // j / jal
     output reg         jumpreg,    // jr
 
-    // HI/LO write enables
     output reg         hilo_write, // mult / div
-    output reg         is_mult     // 1=mult, 0=div
+    output reg         is_mult     
 );
     always @(*) begin
-        // defaults (NOP)
+        // 預設值 (NOP 狀態)
         reg_dst    = 0; reg_write  = 0; link       = 0;
         alu_ctrl   = 3'b010; alu_src = 0;
         mem_read   = 0; mem_write  = 0; mem_to_reg = 0;
@@ -239,23 +237,25 @@ module control_unit (
         case (opcode)
             6'd0: begin   // R-format
                 case (funct)
-                    6'd8:  begin jumpreg = 1;                                    end // jr
-                    6'd24: begin hilo_write = 1; is_mult = 1;                   end // mult
-                    6'd26: begin hilo_write = 1; is_mult = 0;                   end // div
-                    6'd32: begin reg_dst=1; reg_write=1; alu_ctrl=3'b010;       end // add
-                    6'd34: begin reg_dst=1; reg_write=1; alu_ctrl=3'b110;       end // sub
-                    6'd36: begin reg_dst=1; reg_write=1; alu_ctrl=3'b000;       end // and
-                    6'd37: begin reg_dst=1; reg_write=1; alu_ctrl=3'b001;       end // or
+                    6'd8:  begin jumpreg = 1;                              end // jr
+                    6'd24: begin hilo_write = 1; is_mult = 1;              end // mult
+                    6'd26: begin hilo_write = 1; is_mult = 0;              end // div
+                    6'd32: begin reg_dst=1; reg_write=1; alu_ctrl=3'b010;  end // add
+                    6'd34: begin reg_dst=1; reg_write=1; alu_ctrl=3'b110;  end // sub
+                    6'd36: begin reg_dst=1; reg_write=1; alu_ctrl=3'b000;  end // and
+                    6'd37: begin reg_dst=1; reg_write=1; alu_ctrl=3'b001;  end // or
+                    6'd42: begin reg_dst=1; reg_write=1; alu_ctrl=3'b111;  end // slt 👈【新補上】
                     default: ;
                 endcase
             end
 
-            6'd4:  begin branch_eq = 1; alu_ctrl = 3'b110;                      end // beq
-            6'd5:  begin branch_ne = 1; alu_ctrl = 3'b110;                      end // bne
-            6'd35: begin alu_src=1; mem_read=1; reg_write=1; mem_to_reg=1;      end // lw
-            6'd43: begin alu_src=1; mem_write=1; alu_ctrl=3'b010;               end // sw
-            6'd2:  begin jump = 1;                                               end // j
-            6'd3:  begin jump = 1; link = 1; reg_write = 1;                     end // jal
+            6'd4:  begin branch_eq = 1; alu_ctrl = 3'b110;                 end // beq
+            6'd5:  begin branch_ne = 1; alu_ctrl = 3'b110;                 end // bne
+            6'd9:  begin reg_write = 1; alu_src = 1; alu_ctrl = 3'b010;    end // addiu 👈【新補上】
+            6'd35: begin alu_src=1; mem_read=1; reg_write=1; mem_to_reg=1; end // lw
+            6'd43: begin alu_src=1; mem_write=1; alu_ctrl=3'b010;          end // sw
+            6'd2:  begin jump = 1;                                         end // j
+            6'd3:  begin jump = 1; link = 1; reg_write = 1;                end // jal
             default: ;
         endcase
     end
@@ -279,7 +279,6 @@ module mips_cpu (
     wire [4:0]  rs     = instr[25:21];
     wire [4:0]  rt     = instr[20:16];
     wire [4:0]  rd     = instr[15:11];
-    // shamt = instr[10:6]  (not used in this ISA subset)
     wire [5:0]  funct  = instr[5:0];
     wire [15:0] immed  = instr[15:0];
     wire [25:0] target = instr[25:0];
@@ -299,7 +298,7 @@ module mips_cpu (
     wire [31:0] reg_wdata;
     wire        rf_we = reg_write;
 
-    reg  [31:0] HI, LO;   // HI / LO special registers
+    reg  [31:0] HI, LO;   
 
     // ---- Sign extension ----
     wire [31:0] sign_ext_imm;
@@ -319,7 +318,7 @@ module mips_cpu (
     // ---- Branch / Jump PC ----
     wire        alu_zero    = (alu_out == 32'd0);
     wire        take_branch = (branch_eq & alu_zero) | (branch_ne & ~alu_zero);
-    wire [7:0]  branch_pc   = pc_next_seq + sign_ext_imm[7:0]; // word-offset branch
+    wire [7:0]  branch_pc   = pc_next_seq + sign_ext_imm[7:0]; 
     wire [7:0]  jump_pc     = target[7:0];
     wire [7:0]  jr_pc       = reg_qa[7:0];
 
@@ -331,7 +330,7 @@ module mips_cpu (
 
     // ---- Write-back data ----
     assign reg_wdata =
-        link       ? {24'd0, pc_next_seq} :   // jal: save return address
+        link       ? {24'd0, pc_next_seq} :   
         mem_to_reg ? dmem_rdata            :
                      alu_out;
 
@@ -417,59 +416,15 @@ module mips_cpu (
         end else begin
             pc <= pc_next;
 
-            // Update HI/LO on mult or div
             if (hilo_write) begin
                 if (is_mult) begin
                     HI <= mult_hi;
                     LO <= mult_lo;
                 end else begin
-                    HI <= div_hi;   // remainder
-                    LO <= div_lo;   // quotient
+                    HI <= div_hi;   
+                    LO <= div_lo;   
                 end
             end
         end
     end
-
 endmodule
-
-
-// ============================================================
-//  Testbench
-// ============================================================
-
-module tb_mips_cpu;
-    reg clk, rst;
-
-    mips_cpu dut (.clk(clk), .rst(rst));
-
-    // 10 ns clock
-    initial clk = 0;
-    always #5 clk = ~clk;
-
-    initial begin
-        $dumpfile("mips_cpu.vcd");
-        $dumpvars(0, tb_mips_cpu);
-
-        rst = 1;
-        @(posedge clk); #1;
-        rst = 0;
-
-        // Run for enough cycles to finish a small program
-        repeat (200) @(posedge clk);
-
-        // Dump register state (R0–R31)
-        $display("\n===== REGISTER DUMP =====");
-        begin : dump
-            integer i;
-            for (i = 0; i < 32; i = i + 1)
-                $display("R%0d = %0d", i, $signed(dut.u_rf.regs[i]));
-        end
-        $display("HI = %0d", $signed(dut.HI));
-        $display("LO = %0d", $signed(dut.LO));
-        $display("PC = %0d", dut.pc);
-        $display("=========================");
-
-        $finish;
-    end
-endmodule
-
