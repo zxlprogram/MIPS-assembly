@@ -183,6 +183,24 @@ void add(bool* rs, bool* rt, bool* rd) {
     printf("add R%d, R%d, R%d (result: %d)\n", rd_idx, rs_idx, rt_idx, toint_signed(out, 32));
 }
 
+void addu(bool* rs, bool* rt, bool* rd) {
+    int rs_idx = toint(rs, 5);
+    int rt_idx = toint(rt, 5);
+    int rd_idx = toint(rd, 5);
+
+    bool inA[32], inB[32], out[32];
+    for(int i = 0; i < 32; i++) {
+        inA[i] = reg[rs_idx].bits[i];
+        inB[i] = reg[rt_idx].bits[i];
+    }
+
+    bool alu_ctrl[3] = {0, 1, 0}; // 使用 ALU 的 ADD 操作
+    ALU(alu_ctrl, inA, inB, out);
+
+    write_register(rd_idx, out);
+    printf("addu R%d, R%d, R%d (result: %d)\n", rd_idx, rs_idx, rt_idx, toint_signed(out, 32));
+}
+
 void sub(bool* rs, bool* rt, bool* rd) {
     int rs_idx = toint(rs, 5);
     int rt_idx = toint(rt, 5);
@@ -328,6 +346,21 @@ void jr(bool* rs) {
     pc_code = target_pc;
 }
 
+bool syscall_mips() {
+    int v0_code = toint_signed_from_int(reg[2].bits, 32); // 讀取 R2 ($v0)
+    if (v0_code == 1) {
+        int a0_val = toint_signed_from_int(reg[4].bits, 32); // 讀取 R4 ($a0)
+        printf("syscall triggered (R2/v0 = 1): Print Integer: %d\n", a0_val);
+    } else if (v0_code == 10) {
+        printf("syscall triggered (R2/v0 = 10): Exit Program.\n");
+        pc_code = -1; // 結束標記，讓迴圈終止
+        return true;  // 代表需要中斷目前的 pc_code 累加
+    } else {
+        printf("syscall triggered unknown code (R2/v0 = %d)\n", v0_code);
+    }
+    return false;
+}
+
 bool beq(bool* rs, bool* rt, bool* immed) {
     int rs_idx = toint(rs, 5);
     int rt_idx = toint(rt, 5);
@@ -414,6 +447,35 @@ void addi(bool* rs, bool* rt, bool* immed) {
     printf("addi R%d, R%d, %d (result: %d)\n", rt_idx, rs_idx, immediate, result);
 }
 
+void addiu(bool* rs, bool* rt, bool* immed) {
+    int rs_idx = toint(rs, 5);
+    int rt_idx = toint(rt, 5);
+    int immediate = toint_signed(immed, 16);
+
+    int val_rs = toint_signed_from_int(reg[rs_idx].bits, 32);
+    int result = val_rs + immediate;
+
+    bool temp[32];
+    for (int i = 31; i >= 0; --i) {
+        temp[i] = (result >> (31 - i)) & 1;
+    }
+    write_register(rt_idx, temp);
+    printf("addiu R%d, R%d, %d (result: %d)\n", rt_idx, rs_idx, immediate, result);
+}
+
+void lui(bool* rt, bool* immed) {
+    int rt_idx = toint(rt, 5);
+    int immediate = toint(immed, 16);
+    int result = immediate << 16; // 將 16 位立即數移到高 16 位
+
+    bool temp[32];
+    for (int i = 31; i >= 0; --i) {
+        temp[i] = (result >> (31 - i)) & 1;
+    }
+    write_register(rt_idx, temp);
+    printf("lui R%d, %d (result: %d)\n", rt_idx, immediate, result);
+}
+
 void slt(bool* rs, bool* rt, bool* rd) {
     int rs_idx = toint(rs, 5);
     int rt_idx = toint(rt, 5);
@@ -448,13 +510,15 @@ void sw(bool* rs, bool* rt, bool* immed) {
     printf("sw R%d, %d(R%d) -> store value: %d into data_mem[%d]\n", rt_idx, offset, rs_idx, value_to_store, mem_address);
 }
 
-void Rformat(bool* opcode, bool* rs, bool* rt, bool* rd, bool* shamt, bool* funct) {
+bool Rformat(bool* opcode, bool* rs, bool* rt, bool* rd, bool* shamt, bool* funct) {
     int code = toint(funct, 6);
     switch(code) {
-        case 8:  jr(rs); break;
+        case 12: return syscall_mips();
+        case 8:  jr(rs); return true;
         case 24: mult(rs, rt); break;
         case 26: div_mips(rs, rt); break;
         case 32: add(rs, rt, rd); break;
+        case 33: addu(rs, rt, rd); break;
         case 34: sub(rs, rt, rd); break;
         case 36: and_mips(rs, rt, rd); break;
         case 37: or_mips(rs, rt, rd); break;
@@ -463,6 +527,7 @@ void Rformat(bool* opcode, bool* rs, bool* rt, bool* rd, bool* shamt, bool* func
             printf("unknown R-format funct code: %d\n", code);
             break;
     }
+    return false;
 }
 
 void Jformat(bool* opcode, bool* target) {
@@ -499,9 +564,11 @@ bool Iformat(bool* opcode, bool* rs, bool* rt, bool* immed) {
     switch(code) {
         case 4:  return beq(rs, rt, immed);
         case 5:  return bne(rs, rt, immed);
+        case 8:  addi(rs, rt, immed); break;
+        case 9:  addiu(rs, rt, immed); break;
+        case 15: lui(rt, immed); break;
         case 35: lw(rs, rt, immed); break;
         case 43: sw(rs, rt, immed); break;
-        case 8:  addi(rs, rt, immed); break;
         default:
             printf("unknown I-format opcode: %d\n", code);
             break;
@@ -526,7 +593,7 @@ int main() {
     reg[1].bits[28] = 1; reg[1].bits[30] = 1; // R1 = 10
     reg[2].bits[30] = 1; reg[2].bits[31] = 1; // R2 = 3
 
-    const char* filename = "input.bin";
+    const char* filename = "fibonacci.bin";
     int total_bits = 0;
     bool* bits = readBinToPtrBool(filename, &total_bits);
 
@@ -549,18 +616,13 @@ int main() {
         bool is_jumped = false;
 
         if(op_type == 0) {
-            int funct_code = toint(command + 26, 6);
-            if (funct_code == 8) {
-                is_jumped = true;
-            }
-            Rformat(command, command + 6, command + 11, command + 16, command + 21, command + 26);
+            is_jumped = Rformat(command, command + 6, command + 11, command + 16, command + 21, command + 26);
         }
         else if(op_type == 2 || op_type == 3) {
             is_jumped = true;
             Jformat(command, command + 6);
         }
         else {
-            // I-format 執行，如果分支條件成立，回傳值會是 true 代表已經手動改過 PC 目的地了。
             is_jumped = Iformat(command, command + 6, command + 11, command + 16);
         }
 

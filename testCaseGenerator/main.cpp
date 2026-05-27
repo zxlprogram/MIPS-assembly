@@ -17,42 +17,23 @@ void writeBinaryString(vector<char>& buffer, const string& binStr) {
 
 int main() {
     vector<char> buffer;
-    writeBinaryString(buffer,"00100000000000010000000000001010");
-    writeBinaryString(buffer,"00100000000000100000000000000011");
-    writeBinaryString(buffer,"00000000001000100001100000100000");
-    writeBinaryString(buffer,"00000000001000100010000000100010");
-    writeBinaryString(buffer,"00000000001000100010100000100100");
-    writeBinaryString(buffer,"00000000001000100011000000100101");
-    writeBinaryString(buffer,"00000000010000010011100000101010");
-    writeBinaryString(buffer,"10101100000000110000000000001000");
-    writeBinaryString(buffer,"10001100000010000000000000001000");
-    writeBinaryString(buffer,"00010000011010000000000000000001");
-    writeBinaryString(buffer,"00100000000010010000001111100111");
-    writeBinaryString(buffer,"00010100001000100000000000000001");
-    writeBinaryString(buffer,"00100000000010100000001111100111");
-    writeBinaryString(buffer,"00000000001000100000000000011000");
-    writeBinaryString(buffer,"00000000001000100000000000011010");
-    writeBinaryString(buffer,"00001100000000000000000000010011");
-    writeBinaryString(buffer,"00100000000010110000000001101111");
-    writeBinaryString(buffer,"00001000000000000000000000010101");
-    writeBinaryString(buffer,"00100000000011000000001111100111");
-    writeBinaryString(buffer,"00100000000011010000001000101011");
-    writeBinaryString(buffer,"00000011111000000000000000001000");
-    writeBinaryString(buffer,"00100000000011100000001100001001");
-
-    /*
-    if (R1 != R2) {
-        R3 = R1 + R2;
-        R5 = R3 - R2;
-        mult R5, R2;
-        goto TARGET_LABEL;
-    }
-    div R1, R2;
-    TARGET_LABEL:
-    lw R7, 5(R2);
-    */
-
-    ofstream outFile("input.bin", ios::binary);
+    writeBinaryString(buffer,"00100100000010000000000000000111");
+    writeBinaryString(buffer,"00100100000100000000000000000000");
+    writeBinaryString(buffer,"00100100000100010000000000000001");
+    writeBinaryString(buffer,"00100100000010010000000000000010");
+    writeBinaryString(buffer,"00000001000010010101000000101010");
+    writeBinaryString(buffer,"00010101010000000000000000000111");
+    writeBinaryString(buffer,"00000010001100001001000000100001");
+    writeBinaryString(buffer,"00000010001000001000000000100001");
+    writeBinaryString(buffer,"00000010010000001000100000100001");
+    writeBinaryString(buffer,"00100101001010010000000000000001");
+    writeBinaryString(buffer,"00001000000000000000000000000100");
+    writeBinaryString(buffer,"00100100000000100000000000000001");
+    writeBinaryString(buffer,"00000010010000000010000000100001");
+    writeBinaryString(buffer,"00000000000000000000000000001100");
+    writeBinaryString(buffer,"00100100000000100000000000001010");
+    writeBinaryString(buffer,"00000000000000000000000000001100");
+    ofstream outFile("fibonacci.bin", ios::binary);
     if (!outFile) {
         cerr << "failed to build the testcase. " << endl;
         return 1;

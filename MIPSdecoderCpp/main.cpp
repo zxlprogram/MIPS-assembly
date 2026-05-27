@@ -130,6 +130,25 @@ private:
         printf("add R%d, R%d, R%d (result: %d)\n", rd_idx, rs_idx, rt_idx, toint_signed(out, 32));
     }
 
+    // R-format 33: addu
+    void addu(const bool* rs, const bool* rt, const bool* rd) {
+        int rs_idx = toint(rs, 5);
+        int rt_idx = toint(rt, 5);
+        int rd_idx = toint(rd, 5);
+
+        bool inA[32], inB[32], out[32];
+        for (int i = 0; i < 32; i++) {
+            inA[i] = reg[rs_idx].bits[i];
+            inB[i] = reg[rt_idx].bits[i];
+        }
+
+        bool alu_ctrl[3] = {false, true, false}; // 同樣使用 ALU ADD 核心
+        ALU(alu_ctrl, inA, inB, out);
+        write_register(rd_idx, out);
+        // addu 在硬體上不處理溢位(Overflow)，在模擬器中與 add 同邏輯，但輸出無號或視作一般加法
+        printf("addu R%d, R%d, R%d (result: %d)\n", rd_idx, rs_idx, rt_idx, toint_signed(out, 32));
+    }
+
     void sub(const bool* rs, const bool* rt, const bool* rd) {
         int rs_idx = toint(rs, 5);
         int rt_idx = toint(rt, 5);
@@ -260,6 +279,27 @@ private:
                rs_idx, rt_idx, toint_signed_from_int(LO.bits, 32), toint_signed_from_int(HI.bits, 32));
     }
 
+    // R-format 12: syscall
+    void syscall() {
+        // 依據 MIPS 規範，系統呼叫代號通常儲存在 $v0 (R2) 暫存器中
+        int v0_val = toint_signed_from_int(reg[2].bits, 32);
+        printf("syscall triggered (R2/v0 = %d): ", v0_val);
+
+        switch (v0_val) {
+            case 1: // 列印整數 (通常放在 $a0 / R4)
+                printf("Print Integer: %d\n", toint_signed_from_int(reg[4].bits, 32));
+                break;
+            case 10: // 結束程式
+                printf("Exit Program.\n");
+                // 可以選擇將 PC 指向非法位址來停下模擬器
+                pc_code = -1;
+                break;
+            default:
+                printf("Unsupported syscall service code.\n");
+                break;
+        }
+    }
+
     void jr(const bool* rs) {
         int rs_idx = toint(rs, 5);
         int target_pc = toint_signed_from_int(reg[rs_idx].bits, 32);
@@ -353,6 +393,38 @@ private:
         printf("addi R%d, R%d, %d (result: %d)\n", rt_idx, rs_idx, immediate, result);
     }
 
+    // I-format 9: addiu
+    void addiu(const bool* rs, const bool* rt, const bool* immed) {
+        int rs_idx = toint(rs, 5);
+        int rt_idx = toint(rt, 5);
+        // 注意：即使是 addiu，16-bit 立即數在 MIPS 中依然做「有號延伸 (Sign-Extension)」
+        int immediate = toint_signed(immed, 16);
+
+        int val_rs = toint_signed_from_int(reg[rs_idx].bits, 32);
+        int result = val_rs + immediate;
+
+        bool temp[32];
+        for (int i = 31; i >= 0; --i) {
+            temp[i] = (result >> (31 - i)) & 1;
+        }
+        write_register(rt_idx, temp);
+        printf("addiu R%d, R%d, %d (result: %d)\n", rt_idx, rs_idx, immediate, result);
+    }
+
+    // I-format 15: lui
+    void lui(const bool* rt, const bool* immed) {
+        int rt_idx = toint(rt, 5);
+        int immediate = toint(immed, 16); // 取出 16-bit 立即數
+
+        bool temp[32] = {false};
+        // 把 16-bit 填入高位 (bits 0 ~ 15)，低位為 0
+        for (int i = 0; i < 16; ++i) {
+            temp[i] = immed[i];
+        }
+        write_register(rt_idx, temp);
+        printf("lui R%d, %d (result: %d)\n", rt_idx, immediate, (immediate << 16));
+    }
+
     void slt(const bool* rs, const bool* rt, const bool* rd) {
         int rs_idx = toint(rs, 5);
         int rt_idx = toint(rt, 5);
@@ -392,9 +464,11 @@ private:
         int code = toint(command + 26, 6);
         switch(code) {
             case 8:  jr(command + 6); break;
+            case 12: syscall(); break;                      // 新增 R-format 12 (syscall)
             case 24: mult(command + 6, command + 11); break;
             case 26: div_mips(command + 6, command + 11); break;
             case 32: add(command + 6, command + 11, command + 16); break;
+            case 33: addu(command + 6, command + 11, command + 16); break; // 新增 R-format 33 (addu)
             case 34: sub(command + 6, command + 11, command + 16); break;
             case 36: and_mips(command + 6, command + 11, command + 16); break;
             case 37: or_mips(command + 6, command + 11, command + 16); break;
@@ -432,9 +506,11 @@ private:
         switch(code) {
             case 4:  return beq(command + 6, command + 11, command + 16);
             case 5:  return bne(command + 6, command + 11, command + 16);
+            case 8:  addi(command + 6, command + 11, command + 16); break;
+            case 9:  addiu(command + 6, command + 11, command + 16); break; // 新增 I-format 9 (addiu)
+            case 15: lui(command + 11, command + 16); break;               // 新增 I-format 15 (lui, 注意 rs 欄位在此指令通常不使用，寫入 rt)
             case 35: lw(command + 6, command + 11, command + 16); break;
             case 43: sw(command + 6, command + 11, command + 16); break;
-            case 8:  addi(command + 6, command + 11, command + 16); break;
             default: printf("unknown I-format opcode: %d\n", code); break;
         }
         return false;
@@ -473,13 +549,13 @@ public:
         }
         for (int i = 0; i < 1024; i++) data_mem[i] = 0;
 
-        // 預設測試資料 (承襲你原本 main 的設定)
+        // 預設測試資料
         data_mem[8] = 99;
         reg[1].bits[28] = true; reg[1].bits[30] = true; // R1 = 10
         reg[2].bits[30] = true; reg[2].bits[31] = true; // R2 = 3
     }
 
-    // --- 新增的函數：直接傳入 32 字元的二進位字串並執行 ---
+    // --- 直接傳入 32 字元的二進位字串並執行 ---
     void command(string machineCode) {
         if (machineCode.length() != 32) {
             cerr << "Error: Machine code must be exactly 32 bits long!" << endl;
@@ -491,7 +567,6 @@ public:
             cmdBits[i] = (machineCode[i] == '1');
         }
 
-        // 單次獨立執行，不影響 PC 的自動計數自增，但若是 Jump 系列仍會修改 PC 的值
         executeSingleCommand(cmdBits);
     }
 
@@ -551,19 +626,32 @@ public:
         printf("=======================================================\n\n");
     }
 };
-
 int main() {
     MipsSimulator sim;
-    //op(000000) rs(00001) rt(00010) rd(00011) shamt(00000) funct(100000)
-    cout << "--- Testing command() function ---" << endl;
-    sim.command("00000000001000100001100000100000");
-    sim.dump_registers();
 
-    // 測試：執行原先的二進位檔案功能
-    cout << "--- Testing binary file execution ---" << endl;
-    if (sim.runBinaryFile("input.bin")) {
-        sim.dump_registers();
+    cout << "--- fibonacci testcase ---" << endl;
+
+    sim.command("00100100000010000000000000000111");
+    sim.command("00100100000100000000000000000000");
+    sim.command("00100100000100010000000000000001");
+    sim.command("00100100000010010000000000000010");
+    sim.command("00000001000010010101000000101010");
+    sim.command("00010101010000000000000000000111");
+    sim.command("00000010001100001001000000100001");
+    sim.command("00000010001000001000000000100001");
+    sim.command("00000010010000001000100000100001");
+    sim.command("00100100100010010000000000000001");
+    for(int i = 0; i < 5; i++) {
+        sim.command("00000010001100001001000000100001");
+        sim.command("00000010001000001000000000100001");
+        sim.command("00000010010000001000100000100001");
+        sim.command("00100101001010010000000000000001");
     }
-
+    sim.command("00100100000000100000000000000001");
+    sim.command("00000010010000000010000000100001");
+    sim.command("00000000000000000000000000001100");
+    sim.command("00100100000000100000000000001010");
+    sim.command("00000000000000000000000000001100");
+    sim.dump_registers();
     return 0;
 }
