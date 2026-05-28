@@ -7,12 +7,16 @@
 	<cstdio>
 	<cstdlib>
 
-1779911459 source:c:\users\user\desktop\personal work\mips_assembly\mipsdecodercpp\main.cpp
+1779935372 source:c:\users\user\desktop\personal work\mips_assembly\mipsdecodercpp\main.cpp
 	<iostream>
 	<vector>
 	<string>
 	<fstream>
 	<bitset>
 	<cstdio>
+	<algorithm>
+	<sstream>
+	<map>
 	<cstdlib>
+	<queue>
 
