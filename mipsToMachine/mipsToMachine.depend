@@ -1,0 +1,11 @@
+# depslib dependency file v1.0
+1779933681 source:c:\users\user\desktop\mipstomachine\main.cpp
+	<iostream>
+	<string>
+	<vector>
+	<sstream>
+	<map>
+	<bitset>
+	<iomanip>
+	<algorithm>
+
